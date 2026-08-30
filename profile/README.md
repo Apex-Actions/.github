@@ -65,18 +65,45 @@ The runtime topology is deliberately lean: a single control-plane EC2 box (`t4g.
 
 The system is organised as a superproject — [`context`](https://github.com/Apex-Actions/context) — which pins every component as a git submodule, owns the lockstep version, and carries the documentation and agent context for the whole fleet.
 
-| Repository | Path in superproject | Language | Role |
+**The superproject**
+
+| Repository | Path | Language | Role |
 |---|---|---|---|
-| [`context`](https://github.com/Apex-Actions/context) | `.` | — | The superproject and system of record for documentation |
+| [`context`](https://github.com/Apex-Actions/context) | `.` | — | Documentation, conventions, submodule pins and the lockstep version |
+
+**Services** — the running system, in `services/`
+
+| Repository | Path | Language | Role |
+|---|---|---|---|
 | [`engine`](https://github.com/Apex-Actions/engine) | `services/engine` | Go | Workflow parser, planner and expression evaluator |
 | [`runner`](https://github.com/Apex-Actions/runner) | `services/runner` | Go | Job execution, log shipping and Spot fleet scaling |
 | [`control-plane`](https://github.com/Apex-Actions/control-plane) | `services/control-plane` | TypeScript | GitHub App, orchestration, queue, secrets, REST + SSE |
-| [`web`](https://github.com/Apex-Actions/web) | `web` | TypeScript | The product UI |
-| [`www`](https://github.com/Apex-Actions/www) | `www` | TypeScript | The marketing site |
+
+**Front ends** — what people see
+
+| Repository | Path | Language | Role |
+|---|---|---|---|
+| [`web`](https://github.com/Apex-Actions/web) | `web` | TypeScript | The product UI, behind GitHub SSO |
+| [`www`](https://github.com/Apex-Actions/www) | `www` | TypeScript | The marketing site at apexactions.com |
+
+**Packages** — shared tooling, in `packages/`
+
+| Repository | Path | Language | Role |
+|---|---|---|---|
 | [`cli`](https://github.com/Apex-Actions/cli) | `packages/cli` | TypeScript | The `apex` developer and operator CLI |
-| [`infra`](https://github.com/Apex-Actions/infra) | `infra` | TypeScript | AWS CDK application and operational CLI |
 | [`release`](https://github.com/Apex-Actions/release) | `packages/release` | TypeScript | Gitflow + lockstep semver library and CLI |
-| [`actions`](https://github.com/Apex-Actions/actions) | — | — | Archived; superseded by `context` (ADR-0013) |
+
+**Infrastructure**
+
+| Repository | Path | Language | Role |
+|---|---|---|---|
+| [`infra`](https://github.com/Apex-Actions/infra) | `infra` | TypeScript | AWS CDK application and operational CLI |
+
+**Archived**
+
+| Repository | Path | Language | Role |
+|---|---|---|---|
+| [`actions`](https://github.com/Apex-Actions/actions) | — | — | Superseded by `context` (ADR-0013) |
 
 ### context
 The superproject. It contains no code and no configuration beyond the agent `.env` (ADR-0017) — only documentation, templates, conventions and the submodule pins. `docs/` holds the binding conventions (`conventions.md`, §0–§12, which every `§`-reference across the fleet points at), the system map (`architecture.md`), roadmaps, ADRs indexed fleet-wide in `decisions.md`, feature docs, run-books, per-repo briefs in `repos/`, the cost and threat models, and task templates. Start a clone with `git clone --recurse-submodules`; the fleet tooling lives in `packages/release`, not the root.
@@ -99,11 +126,11 @@ The marketing site at apexactions.com — a fully prerendered Next.js static exp
 ### cli
 `apex`, the developer and operator CLI (TypeScript, commander), one command per leaf. `apex run` reaches the local runner binary and `apex validate` the engine binary; `apex logs` and `apex dispatch` call the control-plane REST API. Beyond those, `runner`, `cache`, `artifact`, `environment` and `deploy` subcommands cover operator work. The CLI authenticates as the machine principal — a terminal cannot complete GitHub's browser sign-in, and the operator token exists so scripts and boot paths keep working when GitHub is unreachable (control-plane ADR-0006). That token is unscoped and should be treated like a root credential.
 
-### infra
-The AWS CDK application and the `apex-infra` operational CLI for the lean topology (ADR-0008): the control-plane box as an ASG of one with an Elastic IP, a retained data volume and SSM-driven compose; platform buckets and KMS; IAM including a GitHub OIDC deploy role; the CloudFront edge; alarms; and the Spot runner fleet with a launch template per pool and an Image Builder pipeline. Infrastructure changes and application releases are separate commands on purpose — `cdk:deploy` converges stacks, while `app:deploy --release X.Y.Z` writes a parameter and replaces the instance — and the marketing site is a third path again (`www:provision`, `www:deploy`) that cannot reach the other two. Verification is explicit rather than assumed: `app:verify` compares the running container's image digest against the registry.
-
 ### release
 The Gitflow and lockstep-semver library, CLI, reusable workflows and commitlint config shared by every repository. `context/VERSION` is the source of truth from which each submodule's `VERSION`, `package.json`, Go ldflags, Docker tags and CDK stack tags are derived, and a bump is one operation across the fleet, with rules aggregated from conventional commits. It also provides the `docs:check`, `context:check` and `version:check` guards.
+
+### infra
+The AWS CDK application and the `apex-infra` operational CLI for the lean topology (ADR-0008): the control-plane box as an ASG of one with an Elastic IP, a retained data volume and SSM-driven compose; platform buckets and KMS; IAM including a GitHub OIDC deploy role; the CloudFront edge; alarms; and the Spot runner fleet with a launch template per pool and an Image Builder pipeline. Infrastructure changes and application releases are separate commands on purpose — `cdk:deploy` converges stacks, while `app:deploy --release X.Y.Z` writes a parameter and replaces the instance — and the marketing site is a third path again (`www:provision`, `www:deploy`) that cannot reach the other two. Verification is explicit rather than assumed: `app:verify` compares the running container's image digest against the registry.
 
 ### actions
 Archived. The superproject moved to `context` (ADR-0013); nothing new lands here.
