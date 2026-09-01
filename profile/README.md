@@ -2,7 +2,7 @@
 
 **A self-hosted, drop-in replacement for GitHub Actions on lean AWS infrastructure.**
 
-Apex Actions runs your existing `.github/workflows/*.yml` files unchanged, integrates with GitHub as a first-class citizen — Check Runs, annotations, merge gating — and replaces GitHub-hosted runner minutes with AWS Spot compute you control.
+Apex Actions runs your existing `.github/workflows/*.yml` files unchanged, integrates with GitHub as a first-class citizen — Check Runs, annotations, merge gating — and replaces GitHub-hosted runner minutes with AWS compute you control.
 
 Compatibility is the product. Teams only switch if their workflows run as-is on day one, so a conformance suite matches the engine against GitHub's documented behaviour, and every differentiator is built on top of that floor.
 
@@ -28,7 +28,7 @@ flowchart TB
         QUEUE --> SCALER
     end
 
-    subgraph FLEET["Runner fleet &nbsp;·&nbsp; EC2 Spot, Graviton first"]
+    subgraph FLEET["Runner fleet &nbsp;·&nbsp; EC2, Graviton first"]
         direction LR
         RUN["<b>apex-runner</b><br/>lease · execute · ship logs"]
         LIB["<b>engine</b><br/>in-process step eval"]
@@ -57,7 +57,7 @@ flowchart TB
 
 The same engine plans a run on the control plane and evaluates steps inside the runner, so `apex run` on a laptop and a job on the fleet cannot drift apart.
 
-The runtime topology is deliberately lean: a single control-plane EC2 box (`t4g.small`, arm64) running Docker Compose behind Caddy — api, engine, scaler, web and Postgres with pgBackRest backups to S3 — fronted by CloudFront, with a Graviton-first EC2 Spot runner fleet that scales to zero, boots a lean AMI in about 20 seconds, runs a fresh container per job, and idle-terminates after five minutes. The fleet sits in a public subnet with inbound closed and no NAT.
+The runtime topology is deliberately lean: a single control-plane EC2 box (`t4g.small`, arm64) running Docker Compose behind Caddy — api, engine, scaler, web and Postgres with pgBackRest backups to S3 — fronted by CloudFront, with a Graviton-first EC2 runner fleet that scales to zero, boots a lean AMI in about 20 seconds, runs a fresh container per job, and idle-terminates after five minutes. The fleet sits in a public subnet with inbound closed and no NAT.
 
 ---
 
@@ -76,7 +76,7 @@ The system is organised as a superproject — [`context`](https://github.com/Ape
 | Repository | Path | Language | Role |
 |---|---|---|---|
 | [`engine`](https://github.com/Apex-Actions/engine) | `services/engine` | Go | Workflow parser, planner and expression evaluator |
-| [`runner`](https://github.com/Apex-Actions/runner) | `services/runner` | Go | Job execution, log shipping and Spot fleet scaling |
+| [`runner`](https://github.com/Apex-Actions/runner) | `services/runner` | Go | Job execution, log shipping and fleet scaling |
 | [`control-plane`](https://github.com/Apex-Actions/control-plane) | `services/control-plane` | TypeScript | GitHub App, orchestration, queue, secrets, REST + SSE |
 
 **Front ends** — what people see
@@ -112,7 +112,7 @@ The superproject. It contains no code and no configuration beyond the agent `.en
 The workflow parser, validator, planner and `${{ }}` expression evaluator, in Go. Written once (ADR-0011) and used two ways: in-process as `pkg/engine` by the runner, and over gRPC (`Validate`/`Plan`/`Evaluate`/`Describe`) by the control plane. `apex-engine` also runs standalone as `validate [files…]`, which is the embedded mode `apex validate` shells out to. Owns the conformance suite that proves GitHub parity.
 
 ### runner
-`apex-runner` executes planned jobs with GitHub's semantics. **Local mode** runs a workflow on a developer machine with Docker — `apex run`, or `go run ./cmd/apex-runner --local --workflow …` — with flags for events, payloads, secrets, vars, inputs, changed files and job images. **Remote lease mode** (`runner.v1`, ADR-0004) connects the same binary to a control plane with a one-time registration token, labels and optional `--ephemeral` operation, and adds fleet lifecycle: IMDS identity, idle exit and Spot drain. `apex-scaler` turns queue depth into EC2 Spot fleet capacity. Owns the runner AMI and the `conformance/` smoke workflows.
+`apex-runner` executes planned jobs with GitHub's semantics. **Local mode** runs a workflow on a developer machine with Docker — `apex run`, or `go run ./cmd/apex-runner --local --workflow …` — with flags for events, payloads, secrets, vars, inputs, changed files and job images. **Remote lease mode** (`runner.v1`, ADR-0004) connects the same binary to a control plane with a one-time registration token, labels and optional `--ephemeral` operation, and adds fleet lifecycle: IMDS identity, idle exit and interruption drain. `apex-scaler` turns queue depth into EC2 fleet capacity. Owns the runner AMI and the `conformance/` smoke workflows.
 
 ### control-plane
 The API, in TypeScript on Fastify: GitHub App and webhook ingress, run orchestration, a Postgres job queue using `SKIP LOCKED`, runner leases over `runner.v1` gRPC, secrets with envelope encryption, logs to S3, and REST + SSE for the UI. It boots unconfigured on purpose — `/healthz` answers while `/readyz` names what is missing — and deployed values arrive from SSM Parameter Store. Self-serve billing is optional: with the payment provider's keys absent, the billing routes answer 404. This repository owns `contracts/`, the fleet's contract home for Protobuf and OpenAPI.
@@ -130,7 +130,7 @@ The marketing site at apexactions.com — a fully prerendered Next.js static exp
 The Gitflow and lockstep-semver library, CLI, reusable workflows and commitlint config shared by every repository. `context/VERSION` is the source of truth from which each submodule's `VERSION`, `package.json`, Go ldflags, Docker tags and CDK stack tags are derived, and a bump is one operation across the fleet, with rules aggregated from conventional commits. It also provides the `docs:check`, `context:check` and `version:check` guards.
 
 ### infra
-The AWS CDK application and the `apex-infra` operational CLI for the lean topology (ADR-0008): the control-plane box as an ASG of one with an Elastic IP, a retained data volume and SSM-driven compose; platform buckets and KMS; IAM including a GitHub OIDC deploy role; the CloudFront edge; alarms; and the Spot runner fleet with a launch template per pool and an Image Builder pipeline. Infrastructure changes and application releases are separate commands on purpose — `cdk:deploy` converges stacks, while `app:deploy --release X.Y.Z` writes a parameter and replaces the instance — and the marketing site is a third path again (`www:provision`, `www:deploy`) that cannot reach the other two. Verification is explicit rather than assumed: `app:verify` compares the running container's image digest against the registry.
+The AWS CDK application and the `apex-infra` operational CLI for the lean topology (ADR-0008): the control-plane box as an ASG of one with an Elastic IP, a retained data volume and SSM-driven compose; platform buckets and KMS; IAM including a GitHub OIDC deploy role; the CloudFront edge; alarms; and the runner fleet with a launch template per pool and an Image Builder pipeline. Infrastructure changes and application releases are separate commands on purpose — `cdk:deploy` converges stacks, while `app:deploy --release X.Y.Z` writes a parameter and replaces the instance — and the marketing site is a third path again (`www:provision`, `www:deploy`) that cannot reach the other two. Verification is explicit rather than assumed: `app:verify` compares the running container's image digest against the registry.
 
 ### actions
 Archived. The superproject moved to `context` (ADR-0013); nothing new lands here.
